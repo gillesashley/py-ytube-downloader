@@ -1,0 +1,43 @@
+# Ignore virtual environment
+venv/
+
+# Ignore media files
+*.mp4
+*.mp3
+*.wav
+*.flv
+*.avi
+*.mkv
+*.mov
+*.wmv
+*.webm
+*.mpeg
+*.ogg
+*.3gp
+*.m4a
+
+# Ignore other common files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.ico
+*.svg
+*.psd
+*.ai
+*.eps
+
+# Ignore temporary files and directories
+*.tmp
+*.log
+*.swp
+*.bak
+*.orig
+
+# Ignore IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
