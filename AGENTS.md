@@ -1,6 +1,6 @@
 # AGENTS.md
 
-YouTube downloader: a CLI (`main.py`) plus a Django webapp (`app/`) being built for Docker/VPS deployment (branch `webapp`). Windows dev machine; everything runs through the repo venv.
+YouTube downloader webapp: Django (`app/`) containerized with Docker for VPS deployment (branch `webapp`). Windows dev machine; everything runs through the repo venv.
 
 ## Commands (PowerShell, from repo root)
 
@@ -28,19 +28,21 @@ Order matters: fix `ruff` before `pyright`; run tests after model changes (`make
 ## Architecture
 
 - `app/` = Django 6.1 project: package `config` (settings), app `downloader`. The app is intentionally NOT a package dir (`app/` has no `__init__.py`) — `manage.py test downloader` not `manage.py test`.
-- `main.py` = standalone CLI, duplicates `app/downloader/services.py` pick logic — keep the two in sync (drift comment in services.py).
-- `services.run_job(job_id)` = the whole download pipeline (yt-dlp extract → pick 1080p/720p → merge with best audio → progress to DB). Runs in a daemon thread per job spawned by the `submit` view.
+- `services.run_job(job_id, resolution=None)` = the whole download pipeline (yt-dlp extract → pick 1080p/720p or the requested height → merge with best audio → progress to DB). Runs in a daemon thread per job spawned by the `submit` view.
 - Threading model: **one gunicorn worker with threads** — the status poll must reach the worker holding the thread. Never scale workers without adding a DB-claim worker process first (see design doc `docs/plans/2026-08-29-webapp-design.md`).
-- Frontend: vanilla JS polling every 2s (no static files, no collectstatic — inline CSS).
-- Auth: the download flow (index/submit/status/download_file) is PUBLIC by design; only
-  `delete` and `/admin/` require login (`login_required` decorator + Django admin's default).
+- Frontend: vanilla JS polling every 2s; CSS lives in `app/static/css/base.css` (project static dir via `STATICFILES_DIRS`; container runs `collectstatic`, whitenoise serves it).
+- **Cancellation**: the public `cancel` view sets `job.cancelled`; the yt-dlp progress hook checks it and raises `DownloadCancelled`, which `run_job` catches BEFORE the generic `except Exception` (marks status `cancelled`, cleans partial files). Don't reorder those handlers.
+- Auth: the download flow (index/submit/status/cancel/download_file) is PUBLIC by design; only
+  `delete` and `/admin/` require login (login_required decorator + Django admin's default).
+- Views are class-based (ListView for index, View subclasses with `http_method_names = ["post"]`
+  carrying `# noqa: RUF012` — django-stubs types that attr as an instance var, don't "fix" it with ClassVar).
 - Download files go to `MEDIA_ROOT` (`app/media`); job rows track relative paths.
 
 ## Gotchas (all learned the hard way)
 
 - **yt-dlp must stay unpinned** in requirements.txt — it breaks with YouTube changes; the pinned 2024.10.7 caused "Requested format is not available". Every container build gets latest.
 - **ffmpeg**: vendored `ffmpeg/bin` used on Windows dev via `ffmpeg_location`; container uses apt ffmpeg on PATH (`FFMPEG_DIR.exists()` check in services.py). 1080p/720p streams are video-only; merging without ffmpeg fails.
-- **yt-dlp `_Params` TypedDict**: Pylance's bundled stubs type-check `YoutubeDL(params=...)` strictly. Passing a plain dict errors — `opts: Any` in services.py; inline dict literals in main.py. Use the same pattern for new yt-dlp calls.
+- **yt-dlp `_Params` TypedDict**: Pylance's bundled stubs type-check `YoutubeDL(params=...)` strictly. Passing a plain dict errors — `opts: Any` in services.py. Use the same pattern for new yt-dlp calls.
 - **Never save the stale Job instance wholesale after progress hooks**: the instance predates raw `update()` progress writes; plain `save()` resets progress to 0. Terminal saves use `save(update_fields=[...])`.
 - `run_job` catches `Exception` (not just `DownloadError`) deliberately — a job stuck in RUNNING is worse than a visible failure. Don't narrow it.
 - `DownloaderConfig.ready()` touches the DB (orphan-job recovery) and must suppress `OperationalError` (runs before first migrate). Django emits a known "DB access in ready()" RuntimeWarning — harmless.
@@ -58,4 +60,4 @@ Order matters: fix `ruff` before `pyright`; run tests after model changes (`make
 
 ## Verification baseline (all currently green)
 
-`ruff check` (extended select) clean · `pyright` 0 errors · `manage.py test downloader` 22/22 · `py_compile main.py` ok.
+`ruff check` (extended select) clean · `pyright` 0 errors · `manage.py test downloader` green · `docker compose up -d --build` + browser check for UI changes.

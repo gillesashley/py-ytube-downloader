@@ -3,19 +3,17 @@ from typing import Any
 
 import yt_dlp
 from django.conf import settings
+from yt_dlp.utils import DownloadCancelled
 
 RESOLUTIONS = (1080, 720)
 
-# ponytail: mirrors main.py pick_video_format/pick_audio_format; keep in sync
 
-
-def pick_video_format(formats):
-    """Best video format, preferring 1080p then 720p."""
-    for height in RESOLUTIONS:
+def pick_video_format(formats, height=None):
+    """Best video format at `height` (1080/720), or 1080→720 fallback when None."""
+    heights = (height,) if height else RESOLUTIONS
+    for h in heights:
         candidates = [
-            f
-            for f in formats
-            if f.get("height") == height and f.get("vcodec") != "none"
+            f for f in formats if f.get("height") == h and f.get("vcodec") != "none"
         ]
         if candidates:
             return max(candidates, key=lambda f: f.get("fps") or 0)
@@ -34,9 +32,17 @@ def pick_audio_format(formats):
 FFMPEG_DIR = Path(__file__).resolve().parents[2] / "ffmpeg" / "bin"
 
 
+def _is_cancelled(job_id):
+    from downloader.models import Job
+
+    return Job.objects.filter(pk=job_id, cancelled=True).exists()
+
+
 def _progress(job_id, d):
     from downloader.models import Job  # local import avoids app-config at module load
 
+    if _is_cancelled(job_id):
+        raise DownloadCancelled
     if d.get("status") != "downloading":
         return
     total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
@@ -47,7 +53,15 @@ def _progress(job_id, d):
         Job.objects.filter(pk=job_id).update(progress=pct)
 
 
-def run_job(job_id):
+def _cleanup_partials(title):
+    """Remove yt-dlp intermediate files (<title>.f* / <title>.*.part)."""
+    for pattern in (f"{title}.f*", f"{title}.*.part"):
+        for p in settings.MEDIA_ROOT.glob(pattern):
+            p.unlink(missing_ok=True)
+
+
+def run_job(job_id, resolution=None):
+    """Run the download; `resolution` is an optional height (1080/720) to use."""
     from downloader.models import Job
 
     job = Job.objects.get(pk=job_id)
@@ -57,10 +71,11 @@ def run_job(job_id):
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
             info = ydl.extract_info(job.url, download=False)
         formats = info.get("formats", [])
-        video = pick_video_format(formats)
+        video = pick_video_format(formats, height=resolution)
         if not video:
             job.status = Job.Status.FAILED
-            job.error = f"'{info.get('title', job.url)}' has no 720p or 1080p format."
+            label = f"{resolution}p" if resolution else "720p or 1080p"
+            job.error = f"'{info.get('title', job.url)}' has no {label} format."
             # update_fields: instance is stale on progress (hook writes to DB directly)
             job.save(update_fields=["status", "error"])
             return
@@ -72,6 +87,9 @@ def run_job(job_id):
 
         job.title = info.get("title", "")
         job.save()
+
+        if _is_cancelled(job.pk):
+            raise DownloadCancelled
 
         # ponytail: opts: Any — yt-dlp's _Params TypedDict comes from Pylance's
         # bundled stubs and rejects plain dicts; keys are verified by ruff/manual
@@ -104,6 +122,12 @@ def run_job(job_id):
         job.progress = 100.0
         # update_fields: instance is stale on progress (hook writes to DB directly)
         job.save(update_fields=["status", "file_path", "progress"])
+    except DownloadCancelled:
+        # user pressed cancel: flag was seen by the progress hook (or pre-download
+        # check); clean up partials and record the terminal state
+        _cleanup_partials(job.title)
+        job.status = Job.Status.CANCELLED
+        job.save(update_fields=["status"])
     # any failure must mark FAILED, never leave the job stuck RUNNING;
     # KeyboardInterrupt/SystemExit are not Exception subclasses, so they still propagate
     except Exception as e:

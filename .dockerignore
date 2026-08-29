@@ -2,6 +2,7 @@ venv/
 media/
 ffmpeg/
 app/db.sqlite3
+app/staticfiles/
 *.mp4
 *.part
 docs/

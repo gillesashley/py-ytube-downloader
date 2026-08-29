@@ -1,0 +1,2 @@
+# docs/ contains illustrative code in markdown (plans); don't format or lint it
+extend-exclude = ["docs"]

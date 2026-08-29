@@ -15,4 +15,4 @@ EXPOSE 8000
 # Single worker: background download threads live in the worker process, and
 # the status poll must always reach them. Add a DB-claim worker process before
 # scaling workers.
-CMD ["sh", "-c", "python manage.py migrate && python manage.py ensure_admin && exec gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 1 --threads 4"]
+CMD ["sh", "-c", "python manage.py collectstatic --noinput && python manage.py migrate && python manage.py ensure_admin && exec gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 1 --threads 4"]

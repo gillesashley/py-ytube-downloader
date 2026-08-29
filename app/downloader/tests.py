@@ -55,6 +55,16 @@ class MockYDL:
         return str(settings.MEDIA_ROOT / "T.mp4")
 
 
+class CancelYDL(MockYDL):
+    """Fires the real progress hook once during download, like yt-dlp does."""
+
+    def extract_info(self, url, download=True):
+        opts = type(self).last_opts or {}
+        for hook in opts.get("progress_hooks", []):
+            hook({"status": "downloading", "downloaded_bytes": 1, "total_bytes": 100})
+        return super().extract_info(url, download)
+
+
 class BoomYDL(MockYDL):
     def __init__(self, info, exc):
         super().__init__(info)
@@ -114,6 +124,15 @@ class FormatPickerTests(TestCase):
         assert v is not None
         self.assertEqual(v["format_id"], "0")
 
+    def test_height_filter_returns_only_that_height(self):
+        formats = [F(height=1080, format_id="a"), F(height=720, format_id="b")]
+        v = pick_video_format(formats, height=720)
+        assert v is not None
+        self.assertEqual(v["format_id"], "b")
+
+    def test_height_filter_none_when_missing(self):
+        self.assertIsNone(pick_video_format([F(height=360)], height=1080))
+
     def test_returns_none_without_audio(self):
         self.assertIsNone(pick_audio_format([F()]))
 
@@ -130,6 +149,55 @@ class RunJobTests(TestCase):
         self.job.refresh_from_db()
         self.assertEqual(self.job.status, Job.Status.FAILED)
         self.assertIn("no 720p or 1080p", self.job.error)
+
+    def test_requested_height_missing_marks_failed(self):
+        info = {
+            "title": "T",
+            "formats": [
+                {
+                    "height": 720,
+                    "vcodec": "avc1",
+                    "fps": 25,
+                    "format_id": "a",
+                    "acodec": "none",
+                }
+            ],
+        }
+        mock_ydl = MockYDL(info)
+        with patch_ydl(mock_ydl):
+            run_job(self.job.pk, resolution=1080)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.FAILED)
+        self.assertIn("no 1080p format", self.job.error)
+
+    def test_requested_height_used_when_present(self):
+        info = {
+            "title": "T",
+            "formats": [
+                {
+                    "height": 1080,
+                    "vcodec": "avc1",
+                    "fps": 25,
+                    "format_id": "137",
+                    "acodec": "none",
+                },
+                {
+                    "height": 720,
+                    "vcodec": "avc1",
+                    "fps": 25,
+                    "format_id": "136",
+                    "acodec": "none",
+                },
+            ],
+        }
+        mock_ydl = MockYDL(info)
+        with patch_ydl(mock_ydl):
+            run_job(self.job.pk, resolution=720)
+        opts = mock_ydl.last_opts
+        assert opts is not None
+        self.assertEqual(opts["format"], "136/best")
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.DONE)
 
     def test_progress_hook_writes_percent(self):
         _progress(
@@ -224,6 +292,58 @@ class RunJobTests(TestCase):
         self.assertEqual(self.job.status, Job.Status.FAILED)
         self.assertIn("ffmpeg merge failed", self.job.error)
 
+    def test_cancelled_job_aborts_and_cleans_partials(self):
+        info = {
+            "title": "T",
+            "formats": [
+                {
+                    "height": 1080,
+                    "vcodec": "avc1",
+                    "fps": 25,
+                    "format_id": "137",
+                    "acodec": "none",
+                },
+                {
+                    "height": 0,
+                    "vcodec": "none",
+                    "acodec": "mp4a",
+                    "abr": 128,
+                    "format_id": "140",
+                },
+            ],
+        }
+        self.job.cancelled = True
+        self.job.save(update_fields=["cancelled"])
+        settings.MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+        (settings.MEDIA_ROOT / "T.f137.mp4.part").write_bytes(b"partial")
+        mock_ydl = CancelYDL(info)
+        with patch_ydl(mock_ydl):
+            run_job(self.job.pk)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.CANCELLED)
+        self.assertFalse((settings.MEDIA_ROOT / "T.f137.mp4.part").exists())
+
+    def test_cancel_before_download_skips(self):
+        info = {
+            "title": "T",
+            "formats": [
+                {
+                    "height": 1080,
+                    "vcodec": "avc1",
+                    "fps": 25,
+                    "format_id": "137",
+                    "acodec": "none",
+                }
+            ],
+        }
+        self.job.cancelled = True
+        self.job.save(update_fields=["cancelled"])
+        mock_ydl = MockYDL(info)
+        with patch_ydl(mock_ydl):
+            run_job(self.job.pk)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.CANCELLED)
+
 
 class ViewTests(TestCase):
     def setUp(self):
@@ -237,8 +357,8 @@ class ViewTests(TestCase):
         called = []
         done = threading.Event()
 
-        def fake_run_job(pk):
-            called.append(pk)
+        def fake_run_job(pk, resolution=None):
+            called.append((pk, resolution))
             done.set()
 
         with patch("downloader.views.run_job", side_effect=fake_run_job):
@@ -247,7 +367,41 @@ class ViewTests(TestCase):
         job = Job.objects.get()
         self.assertEqual(job.url, "https://example.com/v")
         self.assertTrue(done.wait(2))
-        self.assertEqual(called, [job.pk])
+        self.assertEqual(called, [(job.pk, None)])
+
+    def test_submit_passes_resolution(self):
+        called = []
+        done = threading.Event()
+
+        def fake_run_job(pk, resolution=None):
+            called.append((pk, resolution))
+            done.set()
+
+        with patch("downloader.views.run_job", side_effect=fake_run_job):
+            self.client.post(
+                reverse("submit"),
+                {"url": "https://example.com/v", "resolution": "720"},
+            )
+        job = Job.objects.get()
+        self.assertTrue(done.wait(2))
+        self.assertEqual(called, [(job.pk, "720")])
+
+    def test_submit_ignores_bogus_resolution(self):
+        called = []
+        done = threading.Event()
+
+        def fake_run_job(pk, resolution=None):
+            called.append((pk, resolution))
+            done.set()
+
+        with patch("downloader.views.run_job", side_effect=fake_run_job):
+            self.client.post(
+                reverse("submit"),
+                {"url": "https://example.com/v", "resolution": "9999"},
+            )
+        job = Job.objects.get()
+        self.assertTrue(done.wait(2))
+        self.assertEqual(called, [(job.pk, None)])
 
     def test_submit_rejects_non_http_url(self):
         r = self.client.post(reverse("submit"), {"url": "not-a-url"})
@@ -261,6 +415,26 @@ class ViewTests(TestCase):
         r = self.client.get(reverse("status", args=[job.pk]))
         self.assertEqual(r.json()["status"], "running")
         self.assertEqual(r.json()["progress"], 42.5)
+
+    def test_cancel_flags_running_job(self):
+        job = Job.objects.create(url="https://example.com/v", status=Job.Status.RUNNING)
+        r = self.client.post(reverse("cancel", args=[job.pk]))
+        self.assertEqual(r.status_code, 302)
+        job.refresh_from_db()
+        self.assertTrue(job.cancelled)
+        self.assertEqual(job.status, Job.Status.RUNNING)  # worker flips it on abort
+
+    def test_cancel_public(self):
+        job = Job.objects.create(url="https://example.com/v", status=Job.Status.RUNNING)
+        self.client.post(reverse("cancel", args=[job.pk]))
+        job.refresh_from_db()
+        self.assertTrue(job.cancelled)
+
+    def test_cancel_noop_on_done_job(self):
+        job = Job.objects.create(url="https://example.com/v", status=Job.Status.DONE)
+        self.client.post(reverse("cancel", args=[job.pk]))
+        job.refresh_from_db()
+        self.assertFalse(job.cancelled)
 
     def test_delete_removes_file_and_job(self):
         self.client.force_login(self.user)
