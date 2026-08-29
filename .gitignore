@@ -7,6 +7,17 @@ ffmpeg/
 # Ignore incomplete downloads
 *.part
 
+# Download storage + static build output
+app/media/
+app/staticfiles/
+
+# Serena MCP memory (agent tool state)
+.serena/
+
+# Local secrets for docker-compose
+.env
+.env.*
+
 # Ignore media files
 *.mp4
 *.mp3
@@ -36,14 +47,22 @@ ffmpeg/
 *.eps
 
 # Ignore temporary files and directories
+__pycache__/
+*.pyc
 *.tmp
 *.log
 *.swp
 *.bak
 *.orig
 
+# Tooling caches
+.ruff_cache/
+
 # Ignore IDE and OS files
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Ignore SQLite database
+*.sqlite3

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Log in &middot; YTube Downloader{% endblock %}
+{% block content %}
+  <section class="card" style="max-width: 420px; margin: 0 auto;">
+    <h1>Log in</h1>
+    <p class="hint">Only needed to delete downloads or manage the site.</p>
+    {% if form.errors %}<div class="msg error">Wrong username or password.</div>{% endif %}
+    <form method="post">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <button type="submit" class="btn primary" style="width: 100%; justify-content: center;">Log in</button>
+    </form>
+  </section>
+{% endblock %}

@@ -1,0 +1,20 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # db.sqlite3 lives in the container FS (not this volume): `docker compose down`
+      # wipes jobs + admin user while media files persist. Use stop/start; `down -v`
+      # resets everything.
+      - media:/app/media
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-prod}
+      - DEBUG=0
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost}
+      - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS:-}
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+
+volumes:
+  media:
