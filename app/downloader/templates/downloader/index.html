@@ -1,41 +1,78 @@
 {% extends "base.html" %}
 {% block content %}
-  <form method="post" action="{% url 'submit' %}">
-    {% csrf_token %}
-    <label for="url">YouTube URL</label>
-    <input type="url" name="url" id="url" required placeholder="https://www.youtube.com/watch?v=...">
-    <button type="submit">Download (1080p/720p)</button>
-  </form>
+  <section class="card form-card">
+    <h1>Download a video</h1>
+    <p class="hint">Paste a YouTube link and we&rsquo;ll grab the best available 1080p or 720p, audio included.</p>
+    <form method="post" action="{% url 'submit' %}">
+      {% csrf_token %}
+      <div class="row">
+        <input type="url" name="url" id="url" required placeholder="https://www.youtube.com/watch?v=..." autofocus>
+        <button type="submit" class="btn primary">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download
+        </button>
+      </div>
+    </form>
+  </section>
 
-  <table>
-    <tr><th>Video</th><th>Status</th><th>Progress</th><th></th></tr>
-    {% for job in jobs %}
-      <tr data-job-id="{{ job.pk }}" data-status="{{ job.status }}">
-        <td>{{ job.title|default:job.url }}<br><small><a href="{{ job.url }}" target="_blank" rel="noopener">{{ job.url|truncatechars:50 }}</a></small></td>
-        <td class="job-status">{{ job.get_status_display }}
-          {% if job.error %}<br><span class="err">{{ job.error }}</span>{% endif %}
-        </td>
-        <td>
-          {% if job.status == "running" or job.status == "queued" %}
-            <div class="bar"><div class="job-progress" style="width: {{ job.progress }}%"></div></div>
-            {{ job.progress|floatformat:0 }}%
-          {% elif job.status == "done" %}
-            <a href="{% url 'download_file' job.pk %}">Download file</a>
-          {% endif %}
-        </td>
-        <td>
-          {% if user.is_authenticated %}
-            <form class="inline" method="post" action="{% url 'delete' job.pk %}"
-                  onsubmit="return confirm('Delete job?');">
-              {% csrf_token %}<button type="submit">Delete</button>
-            </form>
-          {% endif %}
-        </td>
-      </tr>
-    {% empty %}
-      <tr><td colspan="4">No downloads yet.</td></tr>
-    {% endfor %}
-  </table>
+  <section class="jobs">
+    <h2>Recent downloads</h2>
+    {% if jobs %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Video</th><th>Status</th><th>Progress</th><th class="td-action"></th></tr>
+          </thead>
+          <tbody>
+            {% for job in jobs %}
+              <tr data-job-id="{{ job.pk }}" data-status="{{ job.status }}">
+                <td data-label="Video">
+                  <span class="job-title">{{ job.title|default:job.url }}</span>
+                  <a class="job-url" href="{{ job.url }}" target="_blank" rel="noopener">{{ job.url|truncatechars:50 }}</a>
+                </td>
+                <td data-label="Status">
+                  <span class="pill pill-{{ job.status }}">{{ job.get_status_display }}</span>
+                  {% if job.error %}<div class="err">{{ job.error }}</div>{% endif %}
+                </td>
+                <td data-label="Progress">
+                  {% if job.status == "running" or job.status == "queued" %}
+                    <div class="bar"><div class="job-progress" style="width: {{ job.progress }}%"></div></div>
+                    <span class="pct job-pct">{{ job.progress|floatformat:0 }}%</span>
+                  {% elif job.status == "done" %}
+                    <a class="btn small" href="{% url 'download_file' job.pk %}">Download file</a>
+                  {% else %}
+                    <span class="muted">&mdash;</span>
+                  {% endif %}
+                </td>
+                <td class="td-action" data-label="">
+                  {% if user.is_authenticated %}
+                    <form class="inline" method="post" action="{% url 'delete' job.pk %}"
+                          onsubmit="return confirm('Delete this job and its file?');">
+                      {% csrf_token %}
+                      <button type="submit" class="btn icon" title="Delete job" aria-label="Delete job">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                      </button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">
+        <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+        </svg>
+        <p>No downloads yet &mdash; paste a link above to get started.</p>
+      </div>
+    {% endif %}
+  </section>
 
   <script>
     // ponytail: vanilla JS, poll active rows every 2s, reload page when done
@@ -45,9 +82,15 @@
           .then(r => r.json())
           .then(j => {
             if (j.status === "running") {
-              row.querySelector(".job-status").textContent = j.status;
               const bar = row.querySelector(".job-progress");
               if (bar) bar.style.width = j.progress + "%";
+              const pct = row.querySelector(".job-pct");
+              if (pct) pct.textContent = Math.round(j.progress) + "%";
+              const pill = row.querySelector(".pill");
+              if (pill) {
+                pill.className = "pill pill-" + j.status;
+                pill.textContent = j.status === "running" ? "Running" : "Queued";
+              }
               setTimeout(poll, 2000);
             } else {
               location.reload();
