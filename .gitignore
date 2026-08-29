@@ -36,6 +36,7 @@ ffmpeg/
 *.eps
 
 # Ignore temporary files and directories
+__pycache__/
 *.tmp
 *.log
 *.swp
