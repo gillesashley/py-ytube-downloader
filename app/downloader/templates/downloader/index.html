@@ -12,12 +12,13 @@
     {% for job in jobs %}
       <tr data-job-id="{{ job.pk }}" data-status="{{ job.status }}">
         <td>{{ job.title|default:job.url }}<br><small><a href="{{ job.url }}" target="_blank" rel="noopener">{{ job.url|truncatechars:50 }}</a></small></td>
-        <td class="job-status">{{ job.status }}
+        <td class="job-status">{{ job.get_status_display }}
           {% if job.error %}<br><span class="err">{{ job.error }}</span>{% endif %}
         </td>
         <td>
           {% if job.status == "running" or job.status == "queued" %}
             <div class="bar"><div class="job-progress" style="width: {{ job.progress }}%"></div></div>
+            {{ job.progress|floatformat:0 }}%
           {% elif job.status == "done" %}
             <a href="{% url 'download_file' job.pk %}">Download file</a>
           {% endif %}
