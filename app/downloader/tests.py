@@ -309,3 +309,11 @@ class StartupTests(TestCase):
         self.assertTrue(
             User.objects.filter(username="boss", is_superuser=True).exists()
         )
+
+    def test_ensure_admin_idempotent(self):
+        from django.core.management import call_command
+
+        with patch.dict("os.environ", {"ADMIN_USER": "boss", "ADMIN_PASSWORD": "pw"}):
+            call_command("ensure_admin")
+            call_command("ensure_admin")
+        self.assertEqual(User.objects.filter(username="boss").count(), 1)

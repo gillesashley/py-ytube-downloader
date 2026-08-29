@@ -12,6 +12,7 @@ class Command(BaseCommand):
         username = os.environ.get("ADMIN_USER", "admin")
         password = os.environ.get("ADMIN_PASSWORD", "admin")
         if not User.objects.filter(username=username).exists():
+            # type: ignore: django-stubs types get_user_model()'s manager as base Manager
             User.objects.create_superuser(username, "", password)  # type: ignore
             self.stdout.write(f"Created superuser '{username}'")
         else:
