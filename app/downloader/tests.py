@@ -1,7 +1,9 @@
 from unittest.mock import patch
 
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.test import TestCase
+from django.urls import reverse
 
 from downloader.models import Job
 from downloader.services import _progress, pick_audio_format, pick_video_format, run_job
@@ -158,3 +160,46 @@ class RunJobTests(TestCase):
         self.job.refresh_from_db()
         self.assertEqual(self.job.status, Job.Status.FAILED)
         self.assertIn("ffmpeg merge failed", self.job.error)
+
+
+class ViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("me", password="pw")
+        self.client.force_login(self.user)
+
+    def test_index_requires_login(self):
+        self.client.logout()
+        r = self.client.get(reverse("index"))
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/accounts/login/", r["Location"])
+
+    def test_submit_creates_job_and_starts(self):
+        with patch("downloader.views.run_job") as m:
+            r = self.client.post(reverse("submit"), {"url": "https://example.com/v"})
+        self.assertEqual(r.status_code, 302)
+        job = Job.objects.get()
+        self.assertEqual(job.url, "https://example.com/v")
+        m.assert_called_once_with(job.pk)
+
+    def test_submit_rejects_non_http_url(self):
+        r = self.client.post(reverse("submit"), {"url": "not-a-url"})
+        self.assertEqual(Job.objects.count(), 0)
+        self.assertEqual(r.status_code, 302)
+
+    def test_status_json(self):
+        job = Job.objects.create(url="https://example.com/v", status=Job.Status.RUNNING, progress=42.5)
+        r = self.client.get(reverse("status", args=[job.pk]))
+        self.assertEqual(r.json()["status"], "running")
+        self.assertEqual(r.json()["progress"], 42.5)
+
+    def test_delete_removes_file_and_job(self):
+        job = Job.objects.create(url="https://example.com/v", file_path="T.mp4")
+        with patch("pathlib.Path.unlink") as m:
+            self.client.post(reverse("delete", args=[job.pk]))
+        m.assert_called_once_with(missing_ok=True)
+        self.assertFalse(Job.objects.filter(pk=job.pk).exists())
+
+    def test_download_file_404_when_missing(self):
+        job = Job.objects.create(url="https://example.com/v", file_path="ghost.mp4")
+        r = self.client.get(reverse("download_file", args=[job.pk]))
+        self.assertEqual(r.status_code, 404)
