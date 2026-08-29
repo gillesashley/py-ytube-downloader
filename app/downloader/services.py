@@ -22,3 +22,78 @@ def pick_audio_format(formats):
         f for f in formats if f.get("vcodec") == "none" and f.get("acodec") != "none"
     ]
     return max(audio, key=lambda f: f.get("abr") or 0) if audio else None
+
+
+from pathlib import Path
+
+import yt_dlp
+from django.conf import settings
+from yt_dlp.utils import DownloadError
+
+FFMPEG_DIR = Path(__file__).resolve().parents[2] / "ffmpeg" / "bin"  # Windows dev only; container uses PATH ffmpeg
+
+
+def _progress(job_id, d):
+    from downloader.models import Job  # local import avoids app-config at module load
+
+    if d.get("status") != "downloading":
+        return
+    total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+    downloaded = d.get("downloaded_bytes") or 0
+    if total:
+        # ponytail: direct update(), no ORM save() — single worker, no race concerns
+        Job.objects.filter(pk=job_id).update(progress=round(downloaded / total * 100, 1))
+
+
+def run_job(job_id):
+    from downloader.models import Job
+
+    job = Job.objects.get(pk=job_id)
+    job.status = Job.Status.RUNNING
+    job.save()
+    try:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+            info = ydl.extract_info(job.url, download=False)
+        formats = info.get("formats", [])
+        video = pick_video_format(formats)
+        if not video:
+            job.status = Job.Status.FAILED
+            job.error = f"'{info.get('title', job.url)}' has no 720p or 1080p format."
+            job.save()
+            return
+        audio = pick_audio_format(formats)
+        if audio and video.get("acodec") == "none":
+            format_sel = f"{video['format_id']}+{audio['format_id']}"
+        else:
+            format_sel = f"{video['format_id']}/best"
+
+        job.title = info.get("title", "")
+        job.save()
+
+        opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "outtmpl": str(settings.MEDIA_ROOT / "%(title)s.%(ext)s"),
+            "format": format_sel,
+            "progress_hooks": [lambda d: _progress(job.pk, d)],
+        }
+        if FFMPEG_DIR.exists():
+            opts["ffmpeg_location"] = str(FFMPEG_DIR)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            # ponytail: deviation from plan — download=True so requested_downloads is
+            # populated on the returned dict; separate ydl.download() re-extracts into a
+            # fresh dict, leaving info["requested_downloads"] absent in production
+            info = ydl.extract_info(job.url, download=True)
+
+        files = [fd["filepath"] for fd in info.get("requested_downloads", []) if fd.get("filepath")]
+        path = Path(files[0]) if files else Path(ydl.prepare_filename(info))
+        try:
+            job.file_path = path.relative_to(settings.MEDIA_ROOT).as_posix()
+        except ValueError:
+            job.file_path = path.name
+        job.status = Job.Status.DONE
+        job.save()
+    except DownloadError as e:
+        job.status = Job.Status.FAILED
+        job.error = str(e)
+        job.save()

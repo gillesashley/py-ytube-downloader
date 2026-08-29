@@ -1,12 +1,41 @@
+from unittest.mock import patch
+
+from django.conf import settings
 from django.test import TestCase
 
 from downloader.models import Job
-from downloader.services import pick_audio_format, pick_video_format
+from downloader.services import pick_audio_format, pick_video_format, run_job
 
 
 def F(**kw):
     return {"height": None, "vcodec": "avc1", "acodec": "none",
             "fps": None, "abr": None, "format_id": "0", **kw}
+
+
+class MockYDL:
+    """Fake yt_dlp.YoutubeDL: returns info on extract_info, writes a fake file."""
+
+    def __init__(self, info):
+        self._info = info
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def extract_info(self, url, download=False):
+        if download:
+            # mirrors real yt_dlp: requested_downloads is only set on the dict
+            # returned by extract_info(download=True)
+            self._info["requested_downloads"] = [{"filepath": str(settings.MEDIA_ROOT / "T.mp4")}]
+        return self._info
+
+    def download(self, urls):
+        return 0
+
+    def prepare_filename(self, info):
+        return str(settings.MEDIA_ROOT / "T.mp4")
 
 
 class JobModelTests(TestCase):
@@ -41,3 +70,43 @@ class FormatPickerTests(TestCase):
 
     def test_returns_none_without_audio(self):
         self.assertIsNone(pick_audio_format([F()]))
+
+
+class RunJobTests(TestCase):
+    def setUp(self):
+        self.job = Job.objects.create(url="https://example.com/v")
+
+    def test_no_720_or_1080_marks_failed(self):
+        info = {"title": "Low res", "formats": [{"height": 360, "vcodec": "avc1"}]}
+        mock_ydl = MockYDL(info)
+        with patch("downloader.services.yt_dlp.YoutubeDL", return_value=mock_ydl):
+            run_job(self.job.pk)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.FAILED)
+        self.assertIn("no 720p or 1080p", self.job.error)
+
+    def test_success_sets_done_and_file(self):
+        info = {"title": "T", "formats": [
+            {"height": 1080, "vcodec": "avc1", "fps": 25, "format_id": "137", "acodec": "none"},
+            {"height": 0, "vcodec": "none", "acodec": "mp4a", "abr": 128, "format_id": "140"},
+        ]}
+        mock_ydl = MockYDL(info)
+        with patch("downloader.services.yt_dlp.YoutubeDL", return_value=mock_ydl):
+            run_job(self.job.pk)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.DONE)
+        self.assertEqual(self.job.title, "T")
+        self.assertEqual(self.job.file_path, "T.mp4")
+
+    def test_download_error_marks_failed(self):
+        from yt_dlp.utils import DownloadError
+
+        class BoomYDL(MockYDL):
+            def extract_info(self, url, download=False):
+                raise DownloadError("connection reset")
+
+        with patch("downloader.services.yt_dlp.YoutubeDL", return_value=BoomYDL(None)):
+            run_job(self.job.pk)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.FAILED)
+        self.assertIn("connection reset", self.job.error)
