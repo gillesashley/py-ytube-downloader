@@ -36,14 +36,16 @@ def submit(request):
 @login_required
 def status(request, job_id):
     job = get_object_or_404(Job, pk=job_id)
-    return JsonResponse({
-        "status": job.status,
-        "progress": job.progress,
-        "title": job.title,
-        "error": job.error,
-        "done": job.status == Job.Status.DONE,
-        "failed": job.status == Job.Status.FAILED,
-    })
+    return JsonResponse(
+        {
+            "status": job.status,
+            "progress": job.progress,
+            "title": job.title,
+            "error": job.error,
+            "done": job.status == Job.Status.DONE,
+            "failed": job.status == Job.Status.FAILED,
+        }
+    )
 
 
 @login_required
@@ -62,4 +64,6 @@ def download_file(request, job_id):
     path = settings.MEDIA_ROOT / job.file_path if job.file_path else None
     if not path or not path.exists():
         raise Http404
-    return FileResponse(path.open("rb"), as_attachment=True, filename=Path(job.file_path).name)
+    return FileResponse(
+        path.open("rb"), as_attachment=True, filename=Path(job.file_path).name
+    )

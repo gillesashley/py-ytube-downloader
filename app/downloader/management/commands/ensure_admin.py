@@ -12,7 +12,7 @@ class Command(BaseCommand):
         username = os.environ.get("ADMIN_USER", "admin")
         password = os.environ.get("ADMIN_PASSWORD", "admin")
         if not User.objects.filter(username=username).exists():
-            User.objects.create_superuser(username, "", password)
+            User.objects.create_superuser(username, "", password)  # type: ignore
             self.stdout.write(f"Created superuser '{username}'")
         else:
             self.stdout.write(f"Superuser '{username}' already exists")

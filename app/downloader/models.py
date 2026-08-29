@@ -10,7 +10,9 @@ class Job(models.Model):
 
     url = models.URLField()
     title = models.CharField(max_length=500, blank=True)
-    status = models.CharField(max_length=10, choices=Status.choices, default=Status.QUEUED)
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.QUEUED
+    )
     error = models.TextField(blank=True)
     file_path = models.CharField(max_length=1000, blank=True)
     progress = models.FloatField(default=0.0)

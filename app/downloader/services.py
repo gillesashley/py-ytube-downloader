@@ -1,3 +1,9 @@
+from pathlib import Path
+from typing import Any
+
+import yt_dlp
+from django.conf import settings
+
 RESOLUTIONS = (1080, 720)
 
 # ponytail: mirrors main.py pick_video_format/pick_audio_format; keep in sync
@@ -24,12 +30,8 @@ def pick_audio_format(formats):
     return max(audio, key=lambda f: f.get("abr") or 0) if audio else None
 
 
-from pathlib import Path
-
-import yt_dlp
-from django.conf import settings
-
-FFMPEG_DIR = Path(__file__).resolve().parents[2] / "ffmpeg" / "bin"  # Windows dev only; container uses PATH ffmpeg
+# Windows dev only; the container uses ffmpeg from PATH
+FFMPEG_DIR = Path(__file__).resolve().parents[2] / "ffmpeg" / "bin"
 
 
 def _progress(job_id, d):
@@ -41,7 +43,8 @@ def _progress(job_id, d):
     downloaded = d.get("downloaded_bytes") or 0
     if total:
         # ponytail: direct update(), no ORM save() — single worker, no race concerns
-        Job.objects.filter(pk=job_id).update(progress=min(round(downloaded / total * 100, 1), 100.0))
+        pct = min(round(downloaded / total * 100, 1), 100.0)
+        Job.objects.filter(pk=job_id).update(progress=pct)
 
 
 def run_job(job_id):
@@ -70,7 +73,9 @@ def run_job(job_id):
         job.title = info.get("title", "")
         job.save()
 
-        opts = {
+        # ponytail: opts: Any — yt-dlp's _Params TypedDict comes from Pylance's
+        # bundled stubs and rejects plain dicts; keys are verified by ruff/manual
+        opts: Any = {
             "quiet": True,
             "no_warnings": True,
             "outtmpl": str(settings.MEDIA_ROOT / "%(title)s.%(ext)s"),
@@ -85,7 +90,11 @@ def run_job(job_id):
             # fresh dict, leaving info["requested_downloads"] absent in production
             info = ydl.extract_info(job.url, download=True)
 
-        files = [fd["filepath"] for fd in info.get("requested_downloads", []) if fd.get("filepath")]
+        files = [
+            fd["filepath"]
+            for fd in info.get("requested_downloads", [])
+            if fd.get("filepath")
+        ]
         path = Path(files[0]) if files else Path(ydl.prepare_filename(info))
         try:
             job.file_path = path.relative_to(settings.MEDIA_ROOT).as_posix()
@@ -97,7 +106,7 @@ def run_job(job_id):
         job.save(update_fields=["status", "file_path", "progress"])
     # any failure must mark FAILED, never leave the job stuck RUNNING;
     # KeyboardInterrupt/SystemExit are not Exception subclasses, so they still propagate
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         job.status = Job.Status.FAILED
         job.error = str(e)
         # update_fields: instance is stale on progress (hook writes to DB directly)

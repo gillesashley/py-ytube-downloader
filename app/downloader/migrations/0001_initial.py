@@ -4,24 +4,42 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []  # noqa: RUF012  # generated
 
-    operations = [
+    operations = [  # noqa: RUF012  # generated
         migrations.CreateModel(
-            name='Job',
+            name="Job",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('url', models.URLField()),
-                ('title', models.CharField(blank=True, max_length=500)),
-                ('status', models.CharField(choices=[('queued', 'Queued'), ('running', 'Running'), ('done', 'Done'), ('failed', 'Failed')], default='queued', max_length=10)),
-                ('error', models.TextField(blank=True)),
-                ('file_path', models.CharField(blank=True, max_length=1000)),
-                ('progress', models.FloatField(default=0.0)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("url", models.URLField()),
+                ("title", models.CharField(blank=True, max_length=500)),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("queued", "Queued"),
+                            ("running", "Running"),
+                            ("done", "Done"),
+                            ("failed", "Failed"),
+                        ],
+                        default="queued",
+                        max_length=10,
+                    ),
+                ),
+                ("error", models.TextField(blank=True)),
+                ("file_path", models.CharField(blank=True, max_length=1000)),
+                ("progress", models.FloatField(default=0.0)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
             ],
         ),
     ]

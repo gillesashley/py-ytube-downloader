@@ -1,3 +1,5 @@
 # yt-dlp intentionally unpinned: YouTube changes break it; every rebuild gets the latest.
 yt-dlp
 Django==6.1
+# dev-only, for type checking (pyright); not needed at runtime
+# django-stubs
