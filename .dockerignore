@@ -1,0 +1,7 @@
+venv/
+media/
+app/db.sqlite3
+*.mp4
+*.part
+docs/
+.git/
