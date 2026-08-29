@@ -159,6 +159,43 @@ class RunJobTests(TestCase):
         self.assertEqual(self.job.status, Job.Status.FAILED)
         self.assertIn("live stream", self.job.error)
 
+    def test_retries_extraction_when_formats_missing(self):
+        """First extract returns a partial format list; second has 720p."""
+        calls = []
+
+        def flaky_ydl_factory(*args, **kwargs):
+            class FlakyYDL(MockYDL):
+                def extract_info(self, url, download=False):
+                    fmt = {
+                        "height": 720,
+                        "vcodec": "avc1",
+                        "fps": 25,
+                        "format_id": "136",
+                        "acodec": "none",
+                    }
+                    full = {"title": "T", "formats": [fmt]}
+                    if download:
+                        return full
+                    calls.append(True)
+                    if len(calls) == 1:
+                        return {
+                            "title": "T",
+                            "formats": [{"height": 360, "vcodec": "avc1"}],
+                        }
+                    return full
+
+            mock = FlakyYDL({})
+            mock.last_opts = args[0] if args else dict(kwargs)
+            return mock
+
+        with patch(
+            "downloader.services.yt_dlp.YoutubeDL", side_effect=flaky_ydl_factory
+        ):
+            run_job(self.job.pk, resolution=720)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.DONE)
+        self.assertEqual(len(calls), 2)  # format extractions, not the download pass
+
     def test_requested_height_missing_marks_failed(self):
         info = {
             "title": "T",

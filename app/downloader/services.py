@@ -80,6 +80,13 @@ def run_job(job_id, resolution=None):
         formats = info.get("formats", [])
         video = pick_video_format(formats, height=resolution)
         if not video:
+            # transient YouTube hiccup: the player response sometimes omits formats;
+            # one re-extraction fixes most of these cases
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+                info = ydl.extract_info(job.url, download=False)
+            formats = info.get("formats", [])
+            video = pick_video_format(formats, height=resolution)
+        if not video:
             job.status = Job.Status.FAILED
             label = f"{resolution}p" if resolution else "720p or 1080p"
             job.error = f"'{info.get('title', job.url)}' has no {label} format."
