@@ -34,3 +34,10 @@ class FormatPickerTests(TestCase):
         formats = [F(abr=128, vcodec="none", acodec="mp4a", format_id="a"),
                    F(abr=256, vcodec="none", acodec="mp4a", format_id="b")]
         self.assertEqual(pick_audio_format(formats)["format_id"], "b")
+
+    def test_excludes_audio_only_formats_from_video(self):
+        formats = [F(height=1080), F(height=1080, vcodec="none", acodec="mp4a")]
+        self.assertEqual(pick_video_format(formats)["format_id"], "0")
+
+    def test_returns_none_without_audio(self):
+        self.assertIsNone(pick_audio_format([F()]))
