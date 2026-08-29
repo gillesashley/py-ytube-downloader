@@ -150,6 +150,15 @@ class RunJobTests(TestCase):
         self.assertEqual(self.job.status, Job.Status.FAILED)
         self.assertIn("no 720p or 1080p", self.job.error)
 
+    def test_live_stream_rejected(self):
+        info = {"title": "Live now", "is_live": True, "formats": []}
+        mock_ydl = MockYDL(info)
+        with patch_ydl(mock_ydl):
+            run_job(self.job.pk)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.FAILED)
+        self.assertIn("live stream", self.job.error)
+
     def test_requested_height_missing_marks_failed(self):
         info = {
             "title": "T",

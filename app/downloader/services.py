@@ -70,6 +70,13 @@ def run_job(job_id, resolution=None):
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
             info = ydl.extract_info(job.url, download=False)
+        if info.get("is_live"):
+            # live streams download until the broadcast ends (unbounded) and their
+            # formats change over the first minutes — reject with a clear message
+            job.status = Job.Status.FAILED
+            job.error = "This is a live stream; wait until it ends, then try again."
+            job.save(update_fields=["status", "error"])
+            return
         formats = info.get("formats", [])
         video = pick_video_format(formats, height=resolution)
         if not video:
