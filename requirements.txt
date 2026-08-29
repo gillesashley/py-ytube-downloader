@@ -1,1 +1,3 @@
-yt-dlp==2026.8.19
+# yt-dlp intentionally unpinned: YouTube changes break it; every rebuild gets the latest.
+yt-dlp
+Django==6.1
