@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+  <form method="post" action="{% url 'submit' %}">
+    {% csrf_token %}
+    <label for="url">YouTube URL</label>
+    <input type="url" name="url" id="url" required placeholder="https://www.youtube.com/watch?v=...">
+    <button type="submit">Download (1080p/720p)</button>
+  </form>
+
+  <table>
+    <tr><th>Video</th><th>Status</th><th>Progress</th><th></th></tr>
+    {% for job in jobs %}
+      <tr data-job-id="{{ job.pk }}" data-status="{{ job.status }}">
+        <td>{{ job.title|default:job.url }}<br><small><a href="{{ job.url }}" target="_blank" rel="noopener">{{ job.url|truncatechars:50 }}</a></small></td>
+        <td class="job-status">{{ job.status }}
+          {% if job.error %}<br><span class="err">{{ job.error }}</span>{% endif %}
+        </td>
+        <td>
+          {% if job.status == "running" or job.status == "queued" %}
+            <div class="bar"><div class="job-progress" style="width: {{ job.progress }}%"></div></div>
+          {% elif job.status == "done" %}
+            <a href="{% url 'download_file' job.pk %}">Download file</a>
+          {% endif %}
+        </td>
+        <td>
+          <form class="inline" method="post" action="{% url 'delete' job.pk %}"
+                onsubmit="return confirm('Delete job?');">
+            {% csrf_token %}<button type="submit">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4">No downloads yet.</td></tr>
+    {% endfor %}
+  </table>
+
+  <script>
+    // ponytail: vanilla JS, poll active rows every 2s, reload page when done
+    document.querySelectorAll("tr[data-status='running'], tr[data-status='queued']").forEach(row => {
+      const poll = () => {
+        fetch(`/status/${row.dataset.jobId}/`)
+          .then(r => r.json())
+          .then(j => {
+            if (j.status === "running") {
+              row.querySelector(".job-status").textContent = j.status;
+              const bar = row.querySelector(".job-progress");
+              if (bar) bar.style.width = j.progress + "%";
+              setTimeout(poll, 2000);
+            } else {
+              location.reload();
+            }
+          })
+          .catch(() => setTimeout(poll, 2000));
+      };
+      setTimeout(poll, 2000);
+    });
+  </script>
+{% endblock %}

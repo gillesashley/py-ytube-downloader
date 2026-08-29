@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}yt-dlp downloader{% endblock %}</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; background: #111; color: #ddd; }
+  h1 { font-size: 1.4rem; }
+  form.inline { display: inline; }
+  input[type=url], input[type=password], input[type=text] { width: 100%; padding: .5rem; margin: .25rem 0 .75rem; box-sizing: border-box; }
+  button { padding: .5rem 1rem; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+  th, td { text-align: left; padding: .4rem; border-bottom: 1px solid #333; vertical-align: top; }
+  .bar { background: #333; border-radius: 4px; height: 12px; width: 120px; }
+  .bar > div { background: #2e8b57; height: 12px; border-radius: 4px; }
+  .err { color: #e57373; }
+  .msg { padding: .5rem .75rem; border-radius: 4px; margin-bottom: 1rem; }
+  .msg.ok { background: #1e3a2a; }
+  .msg.bad { background: #4a1e1e; }
+  a { color: #7cb3ff; }
+</style>
+</head>
+<body>
+  <h1>yt-dlp downloader</h1>
+  <p><small>{% if user.is_authenticated %}{{ user.username }} · <a href="{% url 'logout' %}">log out</a>{% else %}<a href="{% url 'login' %}">log in</a>{% endif %}</small></p>
+  {% if messages %}
+    {% for m in messages %}<div class="msg {{ m.tags }}">{{ m }}</div>{% endfor %}
+  {% endif %}
+  {% block content %}{% endblock %}
+</body>
+</html>
