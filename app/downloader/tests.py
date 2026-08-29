@@ -8,6 +8,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from downloader.apps import DownloaderConfig
 from downloader.models import Job
 from downloader.services import _progress, pick_audio_format, pick_video_format, run_job
 
@@ -224,3 +225,18 @@ class ViewTests(TestCase):
             self.assertEqual(r.headers["Content-Disposition"], 'attachment; filename="T.mp4"')
             self.assertEqual(b"".join(r.streaming_content), b"data")
             r.close()  # release the file handle so Windows allows temp-dir cleanup
+
+
+class StartupTests(TestCase):
+    def test_ready_marks_orphaned_running_jobs_failed(self):
+        job = Job.objects.create(url="https://example.com/v", status=Job.Status.RUNNING)
+        DownloaderConfig.create("downloader.apps.DownloaderConfig").ready()
+        job.refresh_from_db()
+        self.assertEqual(job.status, Job.Status.FAILED)
+        self.assertIn("Interrupted", job.error)
+
+    def test_ensure_admin_creates_superuser(self):
+        from django.core.management import call_command
+        with patch.dict("os.environ", {"ADMIN_USER": "boss", "ADMIN_PASSWORD": "pw"}):
+            call_command("ensure_admin")
+        self.assertTrue(User.objects.filter(username="boss", is_superuser=True).exists())
