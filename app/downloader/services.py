@@ -28,7 +28,6 @@ from pathlib import Path
 
 import yt_dlp
 from django.conf import settings
-from yt_dlp.utils import DownloadError
 
 FFMPEG_DIR = Path(__file__).resolve().parents[2] / "ffmpeg" / "bin"  # Windows dev only; container uses PATH ffmpeg
 
@@ -42,7 +41,7 @@ def _progress(job_id, d):
     downloaded = d.get("downloaded_bytes") or 0
     if total:
         # ponytail: direct update(), no ORM save() — single worker, no race concerns
-        Job.objects.filter(pk=job_id).update(progress=round(downloaded / total * 100, 1))
+        Job.objects.filter(pk=job_id).update(progress=min(round(downloaded / total * 100, 1), 100.0))
 
 
 def run_job(job_id):
@@ -59,7 +58,8 @@ def run_job(job_id):
         if not video:
             job.status = Job.Status.FAILED
             job.error = f"'{info.get('title', job.url)}' has no 720p or 1080p format."
-            job.save()
+            # update_fields: instance is stale on progress (hook writes to DB directly)
+            job.save(update_fields=["status", "error"])
             return
         audio = pick_audio_format(formats)
         if audio and video.get("acodec") == "none":
@@ -92,8 +92,13 @@ def run_job(job_id):
         except ValueError:
             job.file_path = path.name
         job.status = Job.Status.DONE
-        job.save()
-    except DownloadError as e:
+        job.progress = 100.0
+        # update_fields: instance is stale on progress (hook writes to DB directly)
+        job.save(update_fields=["status", "file_path", "progress"])
+    # any failure must mark FAILED, never leave the job stuck RUNNING;
+    # KeyboardInterrupt/SystemExit are not Exception subclasses, so they still propagate
+    except Exception as e:  # noqa: BLE001
         job.status = Job.Status.FAILED
         job.error = str(e)
-        job.save()
+        # update_fields: instance is stale on progress (hook writes to DB directly)
+        job.save(update_fields=["status", "error"])

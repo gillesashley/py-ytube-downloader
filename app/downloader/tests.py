@@ -4,7 +4,7 @@ from django.conf import settings
 from django.test import TestCase
 
 from downloader.models import Job
-from downloader.services import pick_audio_format, pick_video_format, run_job
+from downloader.services import _progress, pick_audio_format, pick_video_format, run_job
 
 
 def F(**kw):
@@ -14,6 +14,8 @@ def F(**kw):
 
 class MockYDL:
     """Fake yt_dlp.YoutubeDL: returns info on extract_info, writes a fake file."""
+
+    last_opts = None
 
     def __init__(self, info):
         self._info = info
@@ -36,6 +38,25 @@ class MockYDL:
 
     def prepare_filename(self, info):
         return str(settings.MEDIA_ROOT / "T.mp4")
+
+
+class BoomYDL(MockYDL):
+    def __init__(self, info, exc):
+        super().__init__(info)
+        self._exc = exc
+
+    def extract_info(self, url, download=False):
+        raise self._exc
+
+
+def patch_ydl(mock_ydl):
+    """Patch downloader.services.yt_dlp.YoutubeDL, recording constructor opts on the mock."""
+
+    def factory(*args, **kwargs):
+        mock_ydl.last_opts = args[0] if args else dict(kwargs)
+        return mock_ydl
+
+    return patch("downloader.services.yt_dlp.YoutubeDL", side_effect=factory)
 
 
 class JobModelTests(TestCase):
@@ -79,11 +100,17 @@ class RunJobTests(TestCase):
     def test_no_720_or_1080_marks_failed(self):
         info = {"title": "Low res", "formats": [{"height": 360, "vcodec": "avc1"}]}
         mock_ydl = MockYDL(info)
-        with patch("downloader.services.yt_dlp.YoutubeDL", return_value=mock_ydl):
+        with patch_ydl(mock_ydl):
             run_job(self.job.pk)
         self.job.refresh_from_db()
         self.assertEqual(self.job.status, Job.Status.FAILED)
         self.assertIn("no 720p or 1080p", self.job.error)
+
+    def test_progress_hook_writes_percent(self):
+        _progress(self.job.pk, {"status": "downloading",
+                                "downloaded_bytes": 50000000, "total_bytes": 100000000})
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.progress, 50.0)
 
     def test_success_sets_done_and_file(self):
         info = {"title": "T", "formats": [
@@ -91,22 +118,43 @@ class RunJobTests(TestCase):
             {"height": 0, "vcodec": "none", "acodec": "mp4a", "abr": 128, "format_id": "140"},
         ]}
         mock_ydl = MockYDL(info)
-        with patch("downloader.services.yt_dlp.YoutubeDL", return_value=mock_ydl):
+        with patch_ydl(mock_ydl):
             run_job(self.job.pk)
+        self.assertEqual(mock_ydl.last_opts["format"], "137+140")
         self.job.refresh_from_db()
         self.assertEqual(self.job.status, Job.Status.DONE)
         self.assertEqual(self.job.title, "T")
         self.assertEqual(self.job.file_path, "T.mp4")
+        self.assertEqual(self.job.progress, 100.0)
+
+    def test_muxed_video_skips_merge(self):
+        info = {"title": "T", "formats": [
+            {"height": 1080, "vcodec": "avc1", "fps": 30, "format_id": "22", "acodec": "mp4a"},
+            {"height": 0, "vcodec": "none", "acodec": "mp4a", "abr": 128, "format_id": "140"},
+        ]}
+        mock_ydl = MockYDL(info)
+        with patch_ydl(mock_ydl):
+            run_job(self.job.pk)
+        self.assertEqual(mock_ydl.last_opts["format"], "22/best")
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.DONE)
 
     def test_download_error_marks_failed(self):
         from yt_dlp.utils import DownloadError
 
-        class BoomYDL(MockYDL):
-            def extract_info(self, url, download=False):
-                raise DownloadError("connection reset")
-
-        with patch("downloader.services.yt_dlp.YoutubeDL", return_value=BoomYDL(None)):
+        mock_ydl = BoomYDL(None, DownloadError("connection reset"))
+        with patch_ydl(mock_ydl):
             run_job(self.job.pk)
         self.job.refresh_from_db()
         self.assertEqual(self.job.status, Job.Status.FAILED)
         self.assertIn("connection reset", self.job.error)
+
+    def test_non_download_error_marks_failed(self):
+        from yt_dlp.utils import PostProcessingError
+
+        mock_ydl = BoomYDL(None, PostProcessingError("ffmpeg merge failed"))
+        with patch_ydl(mock_ydl):
+            run_job(self.job.pk)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, Job.Status.FAILED)
+        self.assertIn("ffmpeg merge failed", self.job.error)
