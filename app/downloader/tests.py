@@ -1,8 +1,11 @@
+import tempfile
+import threading
+from pathlib import Path
 from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from downloader.models import Job
@@ -174,12 +177,20 @@ class ViewTests(TestCase):
         self.assertIn("/accounts/login/", r["Location"])
 
     def test_submit_creates_job_and_starts(self):
-        with patch("downloader.views.run_job") as m:
+        called = []
+        done = threading.Event()
+
+        def fake_run_job(pk):
+            called.append(pk)
+            done.set()
+
+        with patch("downloader.views.run_job", side_effect=fake_run_job):
             r = self.client.post(reverse("submit"), {"url": "https://example.com/v"})
         self.assertEqual(r.status_code, 302)
         job = Job.objects.get()
         self.assertEqual(job.url, "https://example.com/v")
-        m.assert_called_once_with(job.pk)
+        self.assertTrue(done.wait(2))
+        self.assertEqual(called, [job.pk])
 
     def test_submit_rejects_non_http_url(self):
         r = self.client.post(reverse("submit"), {"url": "not-a-url"})
@@ -203,3 +214,13 @@ class ViewTests(TestCase):
         job = Job.objects.create(url="https://example.com/v", file_path="ghost.mp4")
         r = self.client.get(reverse("download_file", args=[job.pk]))
         self.assertEqual(r.status_code, 404)
+
+    def test_download_file_serves_attachment(self):
+        with tempfile.TemporaryDirectory() as tmp, override_settings(MEDIA_ROOT=Path(tmp)):
+            Path(tmp, "T.mp4").write_bytes(b"data")
+            job = Job.objects.create(url="https://example.com/v", file_path="T.mp4")
+            r = self.client.get(reverse("download_file", args=[job.pk]))
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(r.headers["Content-Disposition"], 'attachment; filename="T.mp4"')
+            self.assertEqual(b"".join(r.streaming_content), b"data")
+            r.close()  # release the file handle so Windows allows temp-dir cleanup
