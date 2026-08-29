@@ -1,6 +1,12 @@
 # Ignore virtual environment
 venv/
 
+# Ignore vendored ffmpeg binaries
+ffmpeg/
+
+# Ignore incomplete downloads
+*.part
+
 # Ignore media files
 *.mp4
 *.mp3
