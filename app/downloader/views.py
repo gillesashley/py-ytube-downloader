@@ -12,13 +12,13 @@ from downloader.models import Job
 from downloader.services import run_job
 
 
-@login_required
+# ponytail: download flow (index/submit/status/download_file) is public by
+# design; only destructive ops (delete) and /admin/ require login
 def index(request):
     jobs = Job.objects.order_by("-created_at")[:20]
     return render(request, "downloader/index.html", {"jobs": jobs})
 
 
-@login_required
 @require_POST
 def submit(request):
     url = request.POST.get("url", "").strip()
@@ -33,7 +33,6 @@ def submit(request):
     return redirect("index")
 
 
-@login_required
 def status(request, job_id):
     job = get_object_or_404(Job, pk=job_id)
     return JsonResponse(
@@ -58,7 +57,6 @@ def delete(request, job_id):
     return redirect("index")
 
 
-@login_required
 def download_file(request, job_id):
     job = get_object_or_404(Job, pk=job_id)
     path = settings.MEDIA_ROOT / job.file_path if job.file_path else None

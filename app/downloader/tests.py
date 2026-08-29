@@ -228,13 +228,10 @@ class RunJobTests(TestCase):
 class ViewTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user("me", password="pw")
-        self.client.force_login(self.user)
 
-    def test_index_requires_login(self):
-        self.client.logout()
+    def test_index_public(self):
         r = self.client.get(reverse("index"))
-        self.assertEqual(r.status_code, 302)
-        self.assertIn("/accounts/login/", r["Location"])
+        self.assertEqual(r.status_code, 200)
 
     def test_submit_creates_job_and_starts(self):
         called = []
@@ -266,11 +263,19 @@ class ViewTests(TestCase):
         self.assertEqual(r.json()["progress"], 42.5)
 
     def test_delete_removes_file_and_job(self):
+        self.client.force_login(self.user)
         job = Job.objects.create(url="https://example.com/v", file_path="T.mp4")
         with patch("pathlib.Path.unlink") as m:
             self.client.post(reverse("delete", args=[job.pk]))
         m.assert_called_once_with(missing_ok=True)
         self.assertFalse(Job.objects.filter(pk=job.pk).exists())
+
+    def test_delete_requires_login(self):
+        job = Job.objects.create(url="https://example.com/v")
+        r = self.client.post(reverse("delete", args=[job.pk]))
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/accounts/login/", r["Location"])
+        self.assertTrue(Job.objects.filter(pk=job.pk).exists())
 
     def test_download_file_404_when_missing(self):
         job = Job.objects.create(url="https://example.com/v", file_path="ghost.mp4")

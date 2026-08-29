@@ -32,6 +32,8 @@ Order matters: fix `ruff` before `pyright`; run tests after model changes (`make
 - `services.run_job(job_id)` = the whole download pipeline (yt-dlp extract → pick 1080p/720p → merge with best audio → progress to DB). Runs in a daemon thread per job spawned by the `submit` view.
 - Threading model: **one gunicorn worker with threads** — the status poll must reach the worker holding the thread. Never scale workers without adding a DB-claim worker process first (see design doc `docs/plans/2026-08-29-webapp-design.md`).
 - Frontend: vanilla JS polling every 2s (no static files, no collectstatic — inline CSS).
+- Auth: the download flow (index/submit/status/download_file) is PUBLIC by design; only
+  `delete` and `/admin/` require login (`login_required` decorator + Django admin's default).
 - Download files go to `MEDIA_ROOT` (`app/media`); job rows track relative paths.
 
 ## Gotchas (all learned the hard way)

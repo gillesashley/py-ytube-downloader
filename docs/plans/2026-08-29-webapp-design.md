@@ -16,7 +16,9 @@ cheap future step (Django's auth already provides the hook).
 - yt-dlp is NOT pinned in requirements.txt — stale pins broke the CLI earlier (2024.10.7
   failure). Every image build pulls the latest yt-dlp.
 - ffmpeg required for merging (video-only 1080p/720p streams) — installed in image via apt.
-- Private: every page behind Django auth; single superuser created from env vars.
+- Private: **download flow is public** (anyone can paste a URL and download); Django admin
+  (`/admin/`) and the destructive delete action require login. Single superuser created
+  from env vars.
 
 ## Architecture
 

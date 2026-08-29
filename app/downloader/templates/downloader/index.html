@@ -24,10 +24,12 @@
           {% endif %}
         </td>
         <td>
-          <form class="inline" method="post" action="{% url 'delete' job.pk %}"
-                onsubmit="return confirm('Delete job?');">
-            {% csrf_token %}<button type="submit">Delete</button>
-          </form>
+          {% if user.is_authenticated %}
+            <form class="inline" method="post" action="{% url 'delete' job.pk %}"
+                  onsubmit="return confirm('Delete job?');">
+              {% csrf_token %}<button type="submit">Delete</button>
+            </form>
+          {% endif %}
         </td>
       </tr>
     {% empty %}
